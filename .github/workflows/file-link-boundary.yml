@@ -1,0 +1,55 @@
+name: Packaged Windows file-link boundary
+
+on:
+  push:
+    paths:
+      - '.github/workflows/file-link-boundary.yml'
+      - 'tests/file_link_boundary_probe.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-file-and-directory-symlinks:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out public verification code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Select Python matching the packaged test runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm Windows Python
+        shell: pwsh
+        run: |
+          python -c "import sys,platform; print('Python',platform.python_version(),'platform',sys.platform); assert sys.platform=='win32' and sys.version_info >= (3,10), 'Windows Python 3.10+ is required'"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test immutable public payload with actual synthetic symlinks
+        shell: pwsh
+        run: |
+          python tests/file_link_boundary_probe.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Summarize exact validation scope
+        if: always()
+        shell: pwsh
+        run: |
+          '## Packaged v0.3.1 Windows symbolic-link boundary' >> $env:GITHUB_STEP_SUMMARY
+          'Hosted Windows VM test with synthetic files; this is separate from user PC validation.' >> $env:GITHUB_STEP_SUMMARY
+          'Security settings and token privileges are unchanged. Existing runner rights only; no administrator elevation, private records, or keys are requested.' >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path -LiteralPath 'file-link-boundary-report.json') {
+            $boundaryReport = Get-Content -LiteralPath 'file-link-boundary-report.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+            "Result: $($boundaryReport.result); required checks: $($boundaryReport.summary.pass)/$($boundaryReport.summary.requiredChecks); complete: $($boundaryReport.summary.complete)" >> $env:GITHUB_STEP_SUMMARY
+            if ($boundaryReport.linkCreation) { "Link creation: $($boundaryReport.linkCreation.result)" >> $env:GITHUB_STEP_SUMMARY }
+            '```json' >> $env:GITHUB_STEP_SUMMARY
+            ($boundaryReport | ConvertTo-Json -Depth 20 -Compress) >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            'NOT_RUN: no report was produced. This job cannot establish a passing boundary test.' >> $env:GITHUB_STEP_SUMMARY
+          }
